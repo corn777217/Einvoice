@@ -1,7 +1,7 @@
 // node --test tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseValue, parseText, findInvoiceNo, findCustNo, compact } from '../assets/providers.js';
+import { parseValue, parseText, findInvoiceNo, findCustNo, compact, assembleBarcodes } from '../assets/providers.js';
 
 const TP = '11211AAA9999999001100110011000'; // 台電官方說明 PDF 範例
 const WA = '10801BBAA0000011B3281'; // 台水頁面範例
@@ -76,6 +76,64 @@ test('欣桃整串依設定長度拆分', () => {
   const r = parseValue('ED00151141012345678ABCD1234', { shintaoSerialLen: 13 });
   assert.equal(r.length, 1);
   assert.deepEqual(r[0].parts, { serial: '1141012345678', check: 'ABCD1234' });
+});
+
+// 台電帳單「本期載具號碼」：類別、年期別+流水號、檢核碼為上下三個條碼（座標仿實際帳單）
+const box = (l, t, r, b) => ({ topLeft: { x: l, y: t }, topRight: { x: r, y: t }, bottomRight: { x: r, y: b }, bottomLeft: { x: l, y: b } });
+const tpHead = '11511BBN1234567';
+const tpTail = '012345678901234';
+
+test('分段條碼：類別＋年期別流水號＋檢核碼', () => {
+  const res = [
+    { text: tpTail, position: box(11, 191, 310, 236) },
+    { text: 'ED0003', position: box(11, 30, 130, 95) },
+    { text: tpHead, position: box(11, 120, 310, 165) },
+    { text: '141130AB1', position: box(600, 500, 800, 540) }, // 繳費條碼
+  ];
+  const { carriers, used } = assembleBarcodes(res);
+  assert.equal(carriers.length, 1);
+  assert.equal(carriers[0].provider, 'taipower');
+  assert.equal(carriers[0].carrier, tpHead + tpTail);
+  assert.deepEqual([...used].sort(), [0, 1, 2]);
+});
+
+test('分段條碼：讀不到類別條碼時以長度判斷', () => {
+  const res = [
+    { text: tpHead, position: box(11, 120, 310, 165) },
+    { text: tpTail, position: box(11, 191, 310, 236) },
+  ];
+  const { carriers } = assembleBarcodes(res);
+  assert.equal(carriers[0]?.provider, 'taipower');
+});
+
+test('分段條碼：兩張帳單並排時不會交錯組合', () => {
+  const tail2 = '999999999999999';
+  const res = [
+    { text: tpHead, position: box(11, 120, 310, 165) },
+    { text: '11512CCN7654321', position: box(700, 120, 1000, 165) },
+    { text: tail2, position: box(700, 191, 1000, 236) },
+    { text: tpTail, position: box(11, 191, 310, 236) },
+  ];
+  const got = assembleBarcodes(res).carriers.map((c) => c.carrier).sort();
+  assert.deepEqual(got, [tpHead + tpTail, '11512CCN7654321' + tail2].sort());
+});
+
+test('分段條碼：欣桃依類別條碼拆成流水號與檢核碼', () => {
+  const res = [
+    { text: 'ED0015', position: box(10, 0, 120, 40) },
+    { text: '11410ABC123', position: box(10, 60, 260, 100) },
+    { text: 'XYZ98765', position: box(10, 120, 220, 160) },
+  ];
+  const { carriers } = assembleBarcodes(res);
+  assert.equal(carriers[0]?.provider, 'shintao');
+  assert.deepEqual(carriers[0].parts, { serial: '11410ABC123', check: 'XYZ98765' });
+});
+
+test('分段條碼文字（OCR／複製帳單）', () => {
+  const text = '本期載具號碼 Carrier\nED0003 載具類別(6位)\n年期別(5位)\n11511BBN1234567 載具流水號(10位)\n檢核碼(15位)\n012345678901234';
+  const r = parseText(text);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].carrier, tpHead + tpTail);
 });
 
 test('compact', () => {

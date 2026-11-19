@@ -240,7 +240,22 @@ export function parseText(text, opts = {}) {
     }
   }
 
-  // 2) 帶標籤的分欄文字
+  // 2) 帳單條碼下方的文字（OCR 或複製）：類別、年期別+流水號、檢核碼分在不同行，中間夾著說明文字
+  const all = norm.split(/[^A-Z0-9]+/).filter(Boolean);
+  all.forEach((tok, i) => {
+    if (!HEAD_RE.test(tok)) return;
+    const type = all.slice(Math.max(0, i - 4), i).reverse().find((x) => TYPE_RE.test(x));
+    const p = type ? PROVIDERS.find((x) => x.typeCode === type) : null;
+    for (const tail of all.slice(i + 1, i + 7)) {
+      const c = buildFrom(p, tok, tail, opts);
+      if (c) {
+        add({ ...c, source: 'text' });
+        break;
+      }
+    }
+  });
+
+  // 3) 帶標籤的分欄文字
   for (const c of parseLabeled(norm, opts)) add(c);
 
   return [...found.values()];
@@ -268,6 +283,105 @@ function parseLabeled(text, opts) {
   // 欣桃：帳單上只有「載具流水號」「載具檢核碼」兩格，且非其他公司格式時歸為欣桃候選
   if (!out.length) out.push(makeCarrier('shintao', { serial, check }, 'labeled'));
   return out;
+}
+
+// ---------------------------------------------------------------- 分段條碼組合
+//
+// 帳單常把載具印成上下排列的多個條碼，例如台電：
+//   ED0003                 ← 載具類別(6)
+//   11511BBN3382911        ← 年期別(5)+流水號(10)
+//   051205157475261        ← 檢核碼
+// 這裡依位置（上下相鄰、左側對齊）把它們接回完整號碼。
+
+const TYPE_RE = /^[A-Z]{2}\d{4}$/;
+const HEAD_RE = new RegExp(`^${PERIOD}[A-Z0-9]{10}$`); // 年期別+流水號
+const PIECE_RE = /^[A-Z0-9]{3,24}$/;
+
+function boxOf(r, i) {
+  const p = r.position;
+  if (!p?.topLeft) return null;
+  const xs = [p.topLeft.x, p.topRight.x, p.bottomLeft.x, p.bottomRight.x];
+  const ys = [p.topLeft.y, p.topRight.y, p.bottomLeft.y, p.bottomRight.y];
+  return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
+}
+
+/** b 是否在 a 正下方附近；回傳距離分數（越小越近），不符合回傳 null */
+function belowScore(a, b) {
+  if (a.box && b.box) {
+    const w = Math.max(a.box.right - a.box.left, b.box.right - b.box.left, 1);
+    const dy = b.box.top - a.box.bottom;
+    const dx = Math.abs(b.box.left - a.box.left);
+    if (dy < -0.05 * w || dy > 0.8 * w || dx > 0.6 * w) return null;
+    return dy + dx * 0.5;
+  }
+  // 沒有位置資訊時，依掃描順序
+  const d = b.i - a.i;
+  return d > 0 && d <= 3 ? d : null;
+}
+
+function buildFrom(p, head, tail, opts) {
+  if (!p) {
+    const r = parseValue(head + tail, opts);
+    return r.length === 1 ? r[0] : null;
+  }
+  if (p.segments) return parseAs(p.id, head + tail, opts);
+  if (p.id === 'shintao') return makeCarrier(p.id, { serial: head, check: tail }, 'value', head + tail);
+  return null;
+}
+
+/**
+ * 把一張畫面上解出的多個條碼組成載具。
+ * @param {Array<{text:string, position?:Object}>} results
+ * @returns {{carriers: Array, used: Set<number>}} used 為已被組合使用的 results 索引
+ */
+export function assembleBarcodes(results, opts = {}) {
+  const items = results.map((r, i) => ({ i, v: compact(r.text), box: boxOf(r, i) }));
+  const used = new Set();
+  const carriers = [];
+  const free = (x) => !used.has(x.i);
+  const nearestBelow = (a, pred) =>
+    items
+      .filter((b) => b !== a && free(b) && pred(b))
+      .map((b) => ({ b, s: belowScore(a, b) }))
+      .filter((x) => x.s !== null)
+      .sort((x, y) => x.s - y.s)
+      .map((x) => x.b);
+
+  // 1) 有載具類別條碼：類別 → 下方第一段 → 再下方第二段
+  for (const t of items.filter((x) => TYPE_RE.test(x.v))) {
+    const p = PROVIDERS.find((x) => x.typeCode === t.v);
+    if (!p) continue;
+    let done = false;
+    for (const h of nearestBelow(t, (b) => PIECE_RE.test(b.v) && !TYPE_RE.test(b.v))) {
+      for (const k of nearestBelow(h, (b) => PIECE_RE.test(b.v) && !TYPE_RE.test(b.v))) {
+        const c = buildFrom(p, h.v, k.v, opts);
+        if (c) {
+          carriers.push(c);
+          [t.i, h.i, k.i].forEach((i) => used.add(i));
+          done = true;
+          break;
+        }
+      }
+      if (done) break;
+    }
+  }
+
+  // 2) 沒有（或讀不到）類別條碼：年期別+流水號 → 下方檢核碼，以總長度判斷公司
+  for (const h of items.filter((x) => free(x) && HEAD_RE.test(x.v))) {
+    for (const k of nearestBelow(h, (b) => PIECE_RE.test(b.v) && !TYPE_RE.test(b.v) && !HEAD_RE.test(b.v))) {
+      const c = buildFrom(null, h.v, k.v, opts);
+      if (c) {
+        carriers.push(c);
+        used.add(h.i);
+        used.add(k.i);
+        // 上方若有對應的類別條碼也一併標記
+        const t = items.find((x) => free(x) && TYPE_RE.test(x.v) && belowScore(x, h) !== null);
+        if (t) used.add(t.i);
+        break;
+      }
+    }
+  }
+  return { carriers, used };
 }
 
 /** 發票號碼：2 碼英文 + 8 碼數字 */

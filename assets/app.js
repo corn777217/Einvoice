@@ -1,5 +1,5 @@
 import {
-  PROVIDERS, byId, parseValue, parseText, parseAs, expectedLength,
+  PROVIDERS, byId, parseValue, parseText, parseAs, expectedLength, assembleBarcodes,
   findInvoiceNo, findCustNo, describePeriod, currentMonth,
 } from './providers.js';
 
@@ -108,13 +108,33 @@ function addOther(text, format) {
   renderOthers();
 }
 
+/** 這組條碼能否組出載具 */
+function carriersIn(results) {
+  const opts = parseOpts();
+  const { carriers, used } = assembleBarcodes(results, opts);
+  const singles = results.filter((r, i) => !used.has(i)).flatMap((r) => parseValue(r.text, opts));
+  return [...carriers, ...singles];
+}
+
 function handleBarcodes(results, source) {
+  const opts = parseOpts();
+  const src = source === 'ocr' ? 'ocr' : 'value';
+  const { carriers, used } = assembleBarcodes(results, opts);
   let added = 0;
-  for (const r of results) {
-    const cands = parseValue(r.text, parseOpts());
-    if (cands.length) added += addCandidates(cands, { source: source === 'ocr' ? 'ocr' : 'value' });
-    else addOther(r.text, r.format);
+  if (carriers.length) {
+    added += addCandidates(carriers.map((c) => ({ ...c, source: src })), { source: src });
+    // 先前畫面只掃到部分條碼時，會被放進「其他條碼」，組合成功後移除
+    const usedTexts = new Set([...used].map((i) => results[i].text));
+    const before = state.others.length;
+    state.others = state.others.filter((o) => !usedTexts.has(o.text));
+    if (state.others.length !== before) { save(); renderOthers(); }
   }
+  results.forEach((r, i) => {
+    if (used.has(i)) return;
+    const cands = parseValue(r.text, opts);
+    if (cands.length) added += addCandidates(cands, { source: src });
+    else addOther(r.text, r.format);
+  });
   return added;
 }
 
@@ -149,7 +169,42 @@ async function decode(imageData) {
     formats: BARCODE_FORMATS,
     maxNumberOfSymbols: 32,
   });
-  return res.filter((r) => r.text && r.isValid !== false).map((r) => ({ text: r.text, format: r.format }));
+  return res
+    .filter((r) => r.text && r.isValid !== false)
+    .map((r) => ({ text: r.text, format: r.format, position: r.position }));
+}
+
+/**
+ * 解碼一張畫面；組不出載具時把畫面放大 2 倍再掃一次。
+ * 帳單縮小顯示時條碼線條只有 1 像素寬，放大後辨識率明顯提高。
+ */
+async function decodeSmart(img) {
+  const first = await decode(img);
+  if (carriersIn(first).length) return first;
+  const scale = Math.min(2, 4096 / Math.max(img.width, img.height));
+  if (scale < 1.4) return first;
+  const up = upscale(img, scale);
+  const second = (await decode(up)).map((r) => ({ ...r, position: scalePosition(r.position, 1 / scale) }));
+  const seen = new Set(second.map((r) => r.text));
+  return [...second, ...first.filter((r) => !seen.has(r.text))];
+}
+
+function upscale(img, scale) {
+  const src = toCanvas(img);
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.width * scale);
+  c.height = Math.round(img.height * scale);
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, 0, 0, c.width, c.height);
+  return ctx.getImageData(0, 0, c.width, c.height);
+}
+
+function scalePosition(p, s) {
+  if (!p) return p;
+  const f = (pt) => ({ x: pt.x * s, y: pt.y * s });
+  return { topLeft: f(p.topLeft), topRight: f(p.topRight), bottomRight: f(p.bottomRight), bottomLeft: f(p.bottomLeft) };
 }
 
 let ocrWorker = null;
@@ -215,14 +270,14 @@ async function handleImageBlob(blob) {
   toast('辨識條碼中…', 0);
   let results = [];
   try {
-    results = await decode(img);
+    results = await decodeSmart(img);
   } catch (e) {
     toast('條碼元件載入失敗，請確認網路連線');
     console.error(e);
     return;
   }
+  const hasCarrier = carriersIn(results).length > 0;
   const added = handleBarcodes(results, 'image');
-  const hasCarrier = results.some((r) => parseValue(r.text, parseOpts()).length);
   if (hasCarrier) {
     toast(added ? `找到 ${added} 筆載具` : '這張圖的載具已在清單中');
     return;
@@ -348,8 +403,9 @@ async function scanTick() {
     if (!img || !live) return;
     lastImage = img;
     live.frames++;
-    const results = await decode(img);
+    const results = await decodeSmart(img);
     if (!live) return;
+    const inFrame = carriersIn(results).length;
     const added = handleBarcodes(results, live.kind);
     if (added) {
       live.found += added;
@@ -357,9 +413,10 @@ async function scanTick() {
     }
     el.liveStatus.textContent = live.found
       ? `已找到 ${live.found} 筆載具，繼續掃描中`
-      : results.length ? `看到 ${results.length} 個條碼，但不是載具` : '掃描中，尚未看到條碼';
-    if (!live.found && live.frames === 12) {
-      el.liveHint.textContent = '一直找不到？條碼可能太小，試著放大帳單畫面；或帳單上沒有條碼，可按「改用文字辨識」。';
+      : inFrame ? '畫面中的載具已在清單裡'
+      : results.length ? `看到 ${results.length} 個條碼，但組不成載具號碼` : '掃描中，尚未看到條碼';
+    if (!live.found && !inFrame && live.frames === 8) {
+      el.liveHint.textContent = '一直找不到？把帳單放大（例如 PDF 縮放到 150% 以上）讓條碼變粗，或按「改用文字辨識」讀取條碼下方的號碼。';
     }
   } catch (e) {
     console.error(e);
@@ -859,4 +916,4 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // 測試用
-window.__einv = { state, handleBarcodes, handleText, decode, addCandidates };
+window.__einv = { state, handleBarcodes, handleText, decode, decodeSmart, addCandidates };
