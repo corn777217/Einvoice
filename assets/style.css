@@ -143,6 +143,16 @@ textarea, input, select {
 textarea { resize: vertical; min-height: 70px; font-family: var(--mono); font-size: .88rem; }
 textarea:focus, input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); border-color: var(--accent); }
 
+.text-row { display: flex; gap: 8px; align-items: stretch; }
+.text-row textarea { flex: 1; min-width: 0; }
+.text-actions { display: flex; flex-direction: column; gap: 6px; }
+.text-actions .btn { flex: 1; min-width: 4.5em; }
+@media (max-width: 480px) {
+  .text-row { flex-direction: column; }
+  .text-actions { flex-direction: row; }
+}
+#textHint { margin-top: 6px; }
+
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 .row.between { justify-content: space-between; }
 .row.end { justify-content: flex-end; }

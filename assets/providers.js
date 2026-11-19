@@ -384,6 +384,28 @@ export function assembleBarcodes(results, opts = {}) {
   return { carriers, used };
 }
 
+/**
+ * 過濾剪貼簿文字：只留下可能是載具號碼的部分，去掉說明文字、金額、日期等。
+ * 已能組成載具的，以「年期別 流水號 檢核碼」分段輸出；其餘保留可能的號碼片段（一行一個）。
+ */
+export function filterCarrierText(text, opts = {}) {
+  const carriers = parseText(text, opts);
+  const lines = carriers.map((c) => {
+    const p = byId[c.provider];
+    return p.segments ? p.segments.map((s) => c.parts[s.key]).join(' ') : `${c.parts.serial} ${c.parts.check}`;
+  });
+  if (carriers.length) return lines.join('\n');
+
+  // 沒有完整載具：保留像號碼的片段（載具類別，或 5～30 碼且至少 4 個數字）
+  const keep = [];
+  for (const tok of normalize(text).split(/[^A-Z0-9]+/)) {
+    const digits = (tok.match(/\d/g) || []).length;
+    const ok = TYPE_RE.test(tok) || (tok.length >= 5 && tok.length <= 30 && digits >= 4);
+    if (ok && !keep.includes(tok)) keep.push(tok);
+  }
+  return keep.join('\n');
+}
+
 /** 發票號碼：2 碼英文 + 8 碼數字 */
 export function findInvoiceNo(text) {
   const m = normalize(text).match(/(?<![A-Z])([A-Z]{2})[-\s]?(\d{8})(?!\d)/);

@@ -1,7 +1,7 @@
 // node --test tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseValue, parseText, findInvoiceNo, findCustNo, compact, assembleBarcodes } from '../assets/providers.js';
+import { parseValue, parseText, findInvoiceNo, findCustNo, compact, assembleBarcodes, filterCarrierText } from '../assets/providers.js';
 
 const TP = '11211AAA9999999001100110011000'; // 台電官方說明 PDF 範例
 const WA = '10801BBAA0000011B3281'; // 台水頁面範例
@@ -138,4 +138,28 @@ test('分段條碼文字（OCR／複製帳單）', () => {
 
 test('compact', () => {
   assert.equal(compact(' ab-12 ３4 '), 'AB1234');
+});
+
+const billText = `台灣電力公司 繳費憑證
+電號 01-23-4567-89-0 計費期間 115/09/16~115/11/14
+應繳總金額 1,234 元 繳費期限 115/12/05
+本期載具號碼 Carrier
+ED0003 載具類別(6位)
+年期別(5位) 載具流水號(10位)
+11511BBN1234567
+檢核碼(15位)
+012345678901234
+客服專線 1911`;
+
+test('過濾剪貼簿：能組成載具時只留分段號碼', () => {
+  assert.equal(filterCarrierText(billText), '11511 BBN1234567 012345678901234');
+});
+
+test('過濾剪貼簿：組不成載具時只留像號碼的片段', () => {
+  const text = '本期載具號碼\n載具類別 ED0003\n年期別+流水號 11511BBN1234567\n應繳 1,234 元　日期 115/12/05\n客服 1911';
+  assert.equal(filterCarrierText(text), 'ED0003\n11511BBN1234567');
+});
+
+test('過濾剪貼簿：沒有號碼時回傳空字串', () => {
+  assert.equal(filterCarrierText('請於繳費期限前繳納，謝謝'), '');
 });

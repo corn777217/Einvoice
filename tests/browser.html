@@ -108,6 +108,26 @@ async function run() {
   const st = JSON.parse(W.localStorage.getItem('einv.v1'));
   ok(st.items.length === 3 && st.settings.profiles.htgas.custNo === '1234567890', 'localStorage 保存');
 
+  // 在空文字框按 Ctrl+V：整份帳單文字 → 直接加入載具，文字框不留雜訊
+  const pasteInto = (text) => {
+    const dt = new W.DataTransfer();
+    dt.setData('text/plain', text);
+    const ev = new W.ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+    ta.value = '';
+    ta.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  };
+  const before = D.querySelectorAll('#todoList .item').length;
+  const prevented = pasteInto('台灣電力公司 繳費憑證\n應繳總金額 1,234 元\n本期載具號碼 Carrier\nED0003 載具類別(6位)\n11511BBN1234567 載具流水號(10位)\n檢核碼(15位)\n012345678901234\n客服專線 1911');
+  await sleep(100);
+  ok(prevented && D.querySelectorAll('#todoList .item').length === before + 1 && ta.value === '', '貼上整份帳單文字：加入 1 筆，文字框清空');
+
+  // 組不成載具：文字框只留號碼片段
+  pasteInto('請核對以下資料\n年期別+流水號 11512CCN7654321\n應繳 1,234 元 日期 115/12/05');
+  await sleep(100);
+  ok(ta.value === '11512CCN7654321', '貼上不完整文字：只留號碼片段 → ' + JSON.stringify(ta.value));
+  ok(!!D.getElementById('btnPaste'), '有「貼上」按鈕');
+
   ok(errors.length === 0, 'iframe 無 JS 錯誤 ' + errors.join(';'));
   D.getElementById('doneSec').open = true;
 }

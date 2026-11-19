@@ -75,11 +75,14 @@
 
       <div class="textbox">
         <label for="textInput" class="label">或貼上帳單文字／號碼</label>
-        <textarea id="textInput" rows="3" placeholder="例如：載具號碼 11406 AAA1234567 123456789012345&#10;可直接貼上電子帳單內容，會自動找出號碼"></textarea>
-        <div class="row between">
-          <span class="hint" id="textHint">手機可用「原況文字／Google 智慧鏡頭」從截圖複製文字後貼上</span>
-          <button class="btn" id="btnParse" type="button">辨識</button>
+        <div class="text-row">
+          <textarea id="textInput" rows="3" placeholder="例如：載具號碼 11406 AAA1234567 123456789012345&#10;可直接貼上整份電子帳單內容，會自動挑出號碼"></textarea>
+          <div class="text-actions">
+            <button class="btn primary" id="btnPaste" type="button" title="讀取剪貼簿的文字或圖片">貼上</button>
+            <button class="btn" id="btnParse" type="button">辨識</button>
+          </div>
         </div>
+        <p class="hint" id="textHint">手機可用「原況文字／Google 智慧鏡頭」從截圖複製文字後貼上</p>
       </div>
     </section>
 

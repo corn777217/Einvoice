@@ -1,5 +1,5 @@
 import {
-  PROVIDERS, byId, parseValue, parseText, parseAs, expectedLength, assembleBarcodes,
+  PROVIDERS, byId, parseValue, parseText, parseAs, expectedLength, assembleBarcodes, filterCarrierText,
   findInvoiceNo, findCustNo, describePeriod, currentMonth,
 } from './providers.js';
 
@@ -14,7 +14,7 @@ const el = {
   screen: $('#btnScreen'), camera: $('#btnCamera'), file: $('#fileInput'),
   live: $('#live'), video: $('#video'), liveStatus: $('#liveStatus'), liveHint: $('#liveHint'),
   liveBadge: $('#liveBadge'), ocr: $('#btnOcr'), stop: $('#btnStop'),
-  text: $('#textInput'), parse: $('#btnParse'), textHint: $('#textHint'),
+  text: $('#textInput'), parse: $('#btnParse'), paste: $('#btnPaste'), textHint: $('#textHint'),
   todoList: $('#todoList'), todoEmpty: $('#todoEmpty'), todoCount: $('#todoCount'),
   otherSec: $('#otherSec'), otherList: $('#otherList'),
   doneList: $('#doneList'), doneCount: $('#doneCount'),
@@ -774,9 +774,49 @@ function parseTextbox() {
   if (found) el.text.value = '';
 }
 el.parse.addEventListener('click', parseTextbox);
-el.text.addEventListener('paste', () => setTimeout(parseTextbox, 0));
 
-// 整頁貼上圖片 / 文字
+/**
+ * 處理剪貼簿文字：用原文辨識（保留「用戶號碼」「發票號碼」等標籤供判讀），
+ * 文字框只放過濾後的號碼，不放帳單上其他說明文字。
+ */
+function handleClipboardText(raw) {
+  if (!raw?.trim()) return;
+  const { found, added } = handleText(raw);
+  if (found) {
+    el.text.value = '';
+    el.textHint.textContent = added ? `找到 ${added} 筆載具` : '這些載具已在清單中';
+    return;
+  }
+  const filtered = filterCarrierText(raw, parseOpts());
+  el.text.value = filtered;
+  el.textHint.textContent = filtered
+    ? '沒有找到完整的載具號碼，已只保留可能的號碼片段，可修正後按「辨識」或用「手動輸入」指定公司'
+    : '剪貼簿裡沒有看起來像載具號碼的文字';
+}
+
+// 「貼上」按鈕：讀取剪貼簿（圖片優先，其次文字）
+el.paste.addEventListener('click', async () => {
+  try {
+    if (navigator.clipboard?.read) {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imgType = item.types.find((t) => t.startsWith('image/'));
+        if (imgType) return handleImageBlob(await item.getType(imgType));
+      }
+      for (const item of items) {
+        if (item.types.includes('text/plain')) {
+          return handleClipboardText(await (await item.getType('text/plain')).text());
+        }
+      }
+      return toast('剪貼簿是空的');
+    }
+    handleClipboardText(await navigator.clipboard.readText());
+  } catch (e) {
+    toast(e.name === 'NotAllowedError' ? '瀏覽器沒有允許讀取剪貼簿，請在框框內長按或按 Ctrl+V 貼上' : '無法讀取剪貼簿');
+  }
+});
+
+// 整頁貼上圖片 / 文字（含在文字框內按 Ctrl+V）
 document.addEventListener('paste', (e) => {
   const items = [...(e.clipboardData?.items || [])];
   const img = items.find((i) => i.type.startsWith('image/'));
@@ -785,12 +825,14 @@ document.addEventListener('paste', (e) => {
     handleImageBlob(img.getAsFile());
     return;
   }
-  const target = e.target;
-  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
   const text = e.clipboardData?.getData('text');
+  const target = e.target;
+  // 文字框已有內容時視為手動編輯，照一般方式貼上
+  if (target === el.text && el.text.value.trim()) return;
+  if (target !== el.text && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
   if (text) {
-    el.text.value = text;
-    parseTextbox();
+    e.preventDefault();
+    handleClipboardText(text);
   }
 });
 
@@ -875,10 +917,7 @@ async function receiveShared() {
   if (!params.has('shared') && !params.has('text')) return;
   history.replaceState(null, '', location.pathname);
   const text = [params.get('title'), params.get('text'), params.get('url')].filter(Boolean).join('\n');
-  if (text) {
-    el.text.value = text;
-    parseTextbox();
-  }
+  if (text) handleClipboardText(text);
   if (params.has('shared') && 'caches' in window) {
     const cache = await caches.open('einv-share');
     for (const req of await cache.keys()) {
@@ -888,7 +927,7 @@ async function receiveShared() {
       if (blob.type.startsWith('image/')) await handleImageBlob(blob);
       else {
         const t = await blob.text();
-        if (t) { el.text.value = t; parseTextbox(); }
+        if (t) handleClipboardText(t);
       }
     }
   }
@@ -946,4 +985,4 @@ setTimeout(checkUpdate, 1500);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
 
 // 測試用
-window.__einv = { state, handleBarcodes, handleText, decode, decodeSmart, addCandidates };
+window.__einv = { state, handleBarcodes, handleText, handleClipboardText, decode, decodeSmart, addCandidates };
