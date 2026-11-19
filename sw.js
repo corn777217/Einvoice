@@ -1,6 +1,8 @@
 // 離線快取 + Android 分享（share_target）
-const VERSION = 'einv-v1';
-const SHELL = ['./', 'index.html', 'assets/app.js', 'assets/providers.js', 'assets/style.css', 'icon.svg', 'manifest.webmanifest'];
+// version.js 改變時瀏覽器會重新安裝這個 service worker，並換用新的快取
+importScripts('version.js');
+const VERSION = `einv-${self.EINV_VERSION?.version || 'dev'}`;
+const SHELL = ['./', 'index.html', 'version.js', 'assets/app.js', 'assets/providers.js', 'assets/style.css', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -50,10 +52,10 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // 自己的檔案：網路優先，離線時用快取
+  // 自己的檔案：網路優先（向伺服器確認是否有更新，不吃 GitHub Pages 的 10 分鐘 HTTP 快取），離線時用快取
   if (url.origin === location.origin) {
     e.respondWith(
-      fetch(e.request)
+      fetch(new Request(e.request.url, { cache: 'no-cache', credentials: 'same-origin' }))
         .then((res) => {
           if (res.ok) caches.open(VERSION).then((c) => c.put(e.request, res.clone()));
           return res;

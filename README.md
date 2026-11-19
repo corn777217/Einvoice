@@ -49,6 +49,16 @@ python -m http.server 8765 --bind 127.0.0.1
 # 開啟 http://127.0.0.1:8765/
 ```
 
+## 版本號
+
+- 版本資訊在 [version.js](version.js)，顯示在標題旁與頁尾，並作為 service worker 的快取名稱。
+- `.git/hooks/pre-commit` 會在每次 commit 執行 `node scripts/bump-version.mjs`：版本號沒手動改就自動 +1 修訂號，並把建置時間更新為 commit 時間。要升次版號／主版號時，直接改 `version.js` 的 `version` 再 commit 即可。
+- hook 不會跟著 repo 走，換電腦 clone 後要重新建立：
+  ```sh
+  printf '#!/bin/sh\nnode scripts/bump-version.mjs && git add version.js\n' > .git/hooks/pre-commit
+  ```
+- 頁面開啟時與切回分頁時，會略過快取直接讀伺服器上的 `version.js`；GitHub Pages 部署完成後，畫面上方會出現「已發布新版本」提示。
+
 ## 自動填入的運作方式
 
 工具開啟歸戶頁時會在網址後面加上 `#einv=<base64url JSON>`（hash 不會傳到對方伺服器）。使用者腳本在該頁讀取後存入腳本儲存空間、清掉 hash，再依頁面填入欄位；欣泰（關貿）需要先選公司再跳頁，所以資料會保留到第二頁填完為止，15 分鐘後失效。腳本不會替你送出表單。

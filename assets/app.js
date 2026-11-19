@@ -908,12 +908,42 @@ renderAutofill();
 setTimeout(renderAutofill, 600);
 receiveShared();
 
-// 用 BarcodeDetector 不支援的格式時仍以 zxing 為主；閒置時預先載入以縮短第一次掃描時間
+// 閒置時預先載入條碼元件，縮短第一次掃描時間
 if ('requestIdleCallback' in window) requestIdleCallback(() => loadZXing().catch(() => {}));
 
+let swReg = null;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.register('sw.js').then((r) => (swReg = r)).catch(() => {});
 }
+
+// ---------------------------------------------------------------- 版本與更新檢查
+const RUNNING = window.EINV_VERSION || { version: '?', build: '' };
+
+function renderVersion() {
+  $('#verTag').textContent = `v${RUNNING.version}`;
+  $('#verFoot').textContent = `版本 v${RUNNING.version}${RUNNING.build ? `・建置 ${RUNNING.build}` : ''}`;
+}
+
+/** 直接向伺服器（GitHub Pages）讀最新的 version.js，略過所有快取 */
+async function checkUpdate() {
+  try {
+    const res = await fetch(`version.js?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const m = (await res.text()).match(/version:\s*'([^']+)',\s*build:\s*'([^']*)'/);
+    if (!m || m[1] === RUNNING.version) return;
+    $('#updateText').textContent = `已發布新版本 v${m[1]}（${m[2]}），目前是 v${RUNNING.version}`;
+    $('#updateBar').hidden = false;
+  } catch (_) { /* 離線 */ }
+}
+
+$('#btnUpdate').addEventListener('click', async () => {
+  try { await swReg?.update(); } catch (_) {}
+  location.reload();
+});
+
+renderVersion();
+setTimeout(checkUpdate, 1500);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
 
 // 測試用
 window.__einv = { state, handleBarcodes, handleText, decode, decodeSmart, addCandidates };

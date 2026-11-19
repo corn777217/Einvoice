@@ -238,6 +238,15 @@ textarea:focus, input:focus, select:focus { outline: 2px solid color-mix(in srgb
 .ptable th { color: var(--muted); font-weight: 600; }
 
 .foot { color: var(--muted); font-size: .78rem; text-align: center; }
+.foot p { margin: .3em 0; }
+
+.ver {
+  font-family: var(--mono); font-size: .68rem; font-weight: 500; letter-spacing: 0;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; vertical-align: 3px;
+}
+.update { background: var(--accent); color: var(--accent-ink); font-size: .88rem; }
+.update-inner { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-block: 8px; }
+.update .small-btn { padding: 3px 12px; font-size: .82rem; background: var(--accent-ink); color: var(--accent); border-color: transparent; font-weight: 600; }
 
 .toast {
   position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);

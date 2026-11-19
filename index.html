@@ -10,6 +10,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
   <link rel="stylesheet" href="assets/style.css">
+  <script src="version.js"></script>
 </head>
 <body>
   <header class="top">
@@ -17,7 +18,7 @@
       <div class="brand">
         <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><use href="#i-logo"/></svg>
         <div>
-          <h1>載具歸戶</h1>
+          <h1>載具歸戶 <span class="ver" id="verTag" title="目前執行的版本"></span></h1>
           <p class="sub">水電瓦斯變動載具・每期歸戶小幫手</p>
         </div>
       </div>
@@ -26,6 +27,13 @@
       </a>
     </div>
   </header>
+
+  <div class="update" id="updateBar" role="status" hidden>
+    <div class="wrap update-inner">
+      <span id="updateText">有新版本</span>
+      <button class="btn small-btn" id="btnUpdate" type="button">重新整理</button>
+    </div>
+  </div>
 
   <main class="wrap">
     <!-- 取得號碼 -->
@@ -162,6 +170,7 @@
 
     <footer class="foot">
       <p>號碼格式與歸戶頁依各公司 2026 年 11 月網站設定，網站改版時自動填入可能失效，仍可使用複製功能。</p>
+      <p id="verFoot"></p>
     </footer>
   </main>
 
