@@ -1,0 +1,118 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>browser test</title>
+<style>body{margin:0;font:13px monospace} iframe{width:1100px;height:1500px;border:0;display:block} #out{white-space:pre-wrap}</style>
+<!-- 瀏覽器整合測試：msedge --headless --dump-dom --virtual-time-budget=30000 http://127.0.0.1:8765/tests/browser.html -->
+<pre id="out">RUNNING</pre>
+<iframe id="f" src="../index.html?test"></iframe>
+<script type="module">
+const out = document.getElementById('out');
+const log = [];
+const show = () => (out.textContent = 'RUNNING\n' + log.join('\n'));
+const ok = (cond, msg) => { log.push(`${cond ? 'PASS' : 'FAIL'} ${msg}`); show(); };
+log.push = function (...a) { Array.prototype.push.apply(this, a); show(); return this.length; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function run() {
+  const f = document.getElementById('f');
+  await new Promise((r) => (f.contentDocument?.readyState === 'complete' ? r() : f.addEventListener('load', r, { once: true })));
+  const w = f.contentWindow;
+  const d = f.contentDocument;
+  w.localStorage.clear();
+  w.location.reload();
+  await new Promise((r) => f.addEventListener('load', r, { once: true }));
+  const W = f.contentWindow;
+  const D = f.contentDocument;
+  const errors = [];
+  W.addEventListener('error', (e) => errors.push(e.message));
+  for (let i = 0; i < 50 && !W.__einv; i++) await sleep(100);
+  ok(!!W.__einv, 'app 載入');
+
+  // 產生測試帳單圖片：台電 Code128、台水 Code39、繳費條碼 Code39
+  await new Promise((r, j) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.6/dist/iife/full/index.js'; s.onload = r; s.onerror = j; document.head.append(s); });
+  const Z = window.ZXingWASM;
+  const c = document.createElement('canvas');
+  c.width = 1400; c.height = 800;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  let y = 40;
+  for (const [text, format] of [['11211AAA9999999001100110011000', 'Code128'], ['10801BBAA0000011B3281', 'Code39'], ['141130AB1', 'Code39']]) {
+    const o = await Z.writeBarcode(text, { format, scale: 2 });
+    const img = await createImageBitmap(o.image);
+    ctx.drawImage(img, 60, y);
+    y += img.height + 50;
+  }
+  const t0 = performance.now();
+  const decoded = await W.__einv.decode(ctx.getImageData(0, 0, c.width, c.height));
+  log.push(`decode ${Math.round(performance.now() - t0)}ms: ${JSON.stringify(decoded)}`);
+  ok(decoded.length === 3, '解出 3 個條碼');
+  const added = W.__einv.handleBarcodes(decoded, 'image');
+  ok(added === 2, `加入 2 筆載具（實際 ${added}）`);
+
+  // 經由 handleImageBlob 路徑（等同使用者貼上圖片）再丟一次，應判定重複
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  const dt = new DataTransfer();
+  dt.items.add(new File([blob], 'bill.png', { type: 'image/png' }));
+  const input = D.getElementById('fileInput');
+  input.files = dt.files;
+  input.dispatchEvent(new Event('change'));
+  await sleep(1500);
+  ok(D.querySelectorAll('#todoList .item').length === 2, '重複圖片不會重複加入');
+
+  // 文字貼上
+  const ta = D.getElementById('textInput');
+  ta.value = '欣泰石油氣 用戶號碼 1234567890\n變動載具 11410 AB12345678 123456789';
+  D.getElementById('btnParse').click();
+  await sleep(200);
+  const items = [...D.querySelectorAll('#todoList .item')].map((n) => ({
+    tag: n.querySelector('.tag').textContent,
+    period: n.querySelector('.period').textContent,
+    number: n.querySelector('.number').innerText.replace(/\s+/g, ' '),
+    chips: [...n.querySelectorAll('.chip')].map((x) => x.textContent).join('|'),
+    extras: [...n.querySelectorAll('.extras input')].map((x) => x.value).join('|'),
+  }));
+  log.push('items: ' + JSON.stringify(items, null, 1));
+  ok(items.length === 3, '共 3 筆待歸戶');
+  ok(items[0].tag.includes('欣泰') && items[0].extras.startsWith('1234567890'), '欣泰自動帶入用戶號碼');
+  ok(D.querySelectorAll('#otherList .row-item').length === 1, '繳費條碼列在其他條碼');
+
+  // 指定其他條碼為台電 → 長度不符
+  const sel = D.querySelector('#otherList select');
+  sel.value = 'taipower';
+  sel.dispatchEvent(new Event('change'));
+  await sleep(100);
+  ok(D.getElementById('toast').textContent.includes('30 碼'), '指定公司時檢查長度：' + D.getElementById('toast').textContent);
+
+  // 開啟歸戶頁：攔截 window.open 檢查 payload
+  const opened = [];
+  W.open = (u) => { opened.push(u); return null; };
+  const twItem = [...D.querySelectorAll('#todoList .item')].find((n) => n.querySelector('.tag').textContent.includes('台電'));
+  twItem.querySelector('.open').click();
+  await sleep(100);
+  const u = opened[0] || '';
+  const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(u.split('#einv=')[1].replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0))));
+  log.push('open: ' + u.split('#')[0] + ' ' + JSON.stringify(payload));
+  ok(u.startsWith('https://service.taipower.com.tw/einvoice/post1#einv='), '台電歸戶頁網址');
+  ok(payload.p === 'taipower' && payload.v.period === '11211' && payload.v.serial === 'AAA9999999' && payload.v.check === '001100110011000', 'payload 分段正確');
+
+  // 標記完成
+  const tw2 = [...D.querySelectorAll('#todoList .item')].find((n) => n.querySelector('.tag').textContent.includes('台電'));
+  tw2.querySelector('.done').click();
+  await sleep(100);
+  ok(D.getElementById('doneCount').textContent === '1', '已完成 1 筆');
+  W.__einv.handleBarcodes([{ text: '11211AAA9999999001100110011000', format: 'Code128' }], 'image');
+  await sleep(50);
+  ok(D.getElementById('toast').textContent.includes('已經歸戶過'), '重複掃到已完成的載具會提示');
+
+  // 狀態存在 localStorage
+  const st = JSON.parse(W.localStorage.getItem('einv.v1'));
+  ok(st.items.length === 3 && st.settings.profiles.htgas.custNo === '1234567890', 'localStorage 保存');
+
+  ok(errors.length === 0, 'iframe 無 JS 錯誤 ' + errors.join(';'));
+  D.getElementById('doneSec').open = true;
+}
+
+run().catch((e) => log.push('FAIL exception ' + e.stack)).finally(() => {
+  out.textContent = 'DONE\n' + log.join('\n');
+});
+</script>

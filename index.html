@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>載具歸戶</title>
+  <meta name="description" content="公用事業變動載具（水、電、瓦斯）每期歸戶小幫手：擷取畫面條碼、辨識號碼、開啟歸戶頁並自動填入。">
+  <meta name="theme-color" content="#1f6f5c">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><use href="#i-logo"/></svg>
+        <div>
+          <h1>載具歸戶</h1>
+          <p class="sub">水電瓦斯變動載具・每期歸戶小幫手</p>
+        </div>
+      </div>
+      <a class="pill" id="autofillPill" href="#setup" data-state="off">
+        <span class="dot"></span><span id="autofillText">自動填入未安裝</span>
+      </a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- 取得號碼 -->
+    <section class="card" aria-labelledby="h-source">
+      <h2 id="h-source">取得載具號碼</h2>
+      <div class="sources">
+        <button class="source" id="btnScreen" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-screen"/></svg>
+          <span class="s-title">擷取畫面</span>
+          <span class="s-desc">選擇顯示帳單的分頁或視窗，自動找出條碼</span>
+        </button>
+        <button class="source" id="btnCamera" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-camera"/></svg>
+          <span class="s-title">相機掃描</span>
+          <span class="s-desc">對準紙本帳單或另一台裝置的螢幕</span>
+        </button>
+        <label class="source" id="btnImage">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-image"/></svg>
+          <span class="s-title">圖片</span>
+          <span class="s-desc">選擇或直接 Ctrl+V 貼上帳單圖片</span>
+          <input type="file" id="fileInput" accept="image/*" multiple hidden>
+        </label>
+      </div>
+
+      <div class="live" id="live" hidden>
+        <div class="live-media">
+          <video id="video" playsinline muted></video>
+          <span class="live-badge" id="liveBadge">掃描中</span>
+        </div>
+        <div class="live-side">
+          <p class="live-status" id="liveStatus">等待畫面…</p>
+          <p class="hint" id="liveHint"></p>
+          <div class="row">
+            <button class="btn" id="btnOcr" type="button">改用文字辨識 (OCR)</button>
+            <button class="btn ghost" id="btnStop" type="button">停止</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="textbox">
+        <label for="textInput" class="label">或貼上帳單文字／號碼</label>
+        <textarea id="textInput" rows="3" placeholder="例如：載具號碼 11406 AAA1234567 123456789012345&#10;可直接貼上電子帳單內容，會自動找出號碼"></textarea>
+        <div class="row between">
+          <span class="hint" id="textHint">手機可用「原況文字／Google 智慧鏡頭」從截圖複製文字後貼上</span>
+          <button class="btn" id="btnParse" type="button">辨識</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 待歸戶 -->
+    <section aria-labelledby="h-todo">
+      <div class="sec-head">
+        <h2 id="h-todo">待歸戶 <span class="count" id="todoCount">0</span></h2>
+        <button class="link" id="btnManual" type="button">手動輸入</button>
+      </div>
+      <form class="card manual" id="manualForm" hidden>
+        <div class="grid2">
+          <label class="field">
+            <span>公司</span>
+            <select id="manualProvider"></select>
+          </label>
+          <label class="field">
+            <span>載具號碼</span>
+            <input id="manualValue" autocomplete="off" spellcheck="false" placeholder="完整號碼，可含空白">
+          </label>
+        </div>
+        <div class="row end">
+          <button class="btn ghost" type="button" id="manualCancel">取消</button>
+          <button class="btn primary" type="submit">加入</button>
+        </div>
+        <p class="hint" id="manualMsg"></p>
+      </form>
+      <div id="todoList" class="list"></div>
+      <div class="empty" id="todoEmpty">
+        <p>還沒有待歸戶的載具。</p>
+        <p class="hint">繳費 1～3 天後才能歸戶，建議等銷帳後再處理。</p>
+      </div>
+    </section>
+
+    <!-- 其他條碼 -->
+    <section id="otherSec" hidden aria-labelledby="h-other">
+      <div class="sec-head">
+        <h2 id="h-other">其他偵測到的條碼</h2>
+        <button class="link" id="btnClearOther" type="button">清除</button>
+      </div>
+      <p class="hint">這些條碼不符合已知的載具格式（多半是繳費條碼）。若其中有載具，可以指定公司。</p>
+      <div id="otherList" class="list compact"></div>
+    </section>
+
+    <!-- 已完成 -->
+    <details class="card fold" id="doneSec">
+      <summary><h2>已完成 <span class="count" id="doneCount">0</span></h2></summary>
+      <div id="doneList" class="list compact"></div>
+      <div class="row end"><button class="link danger" id="btnClearDone" type="button">清除紀錄</button></div>
+    </details>
+
+    <!-- 設定 -->
+    <details class="card fold" id="setup">
+      <summary><h2>設定與自動填入</h2></summary>
+
+      <h3>固定資料</h3>
+      <p class="hint">部分公司的歸戶頁還要填用戶號碼、姓名，填一次就會記住（只存在這個瀏覽器）。</p>
+      <div id="profileFields" class="grid2"></div>
+
+      <h3>自動填入（使用者腳本）</h3>
+      <p>安裝後，按「開啟歸戶頁」時會自動把號碼填進各公司的歸戶表單，只剩圖形驗證碼要自己輸入。沒有安裝也能用：按鈕會同時把號碼複製到剪貼簿，到頁面上貼上即可。</p>
+      <ol class="steps">
+        <li><b>電腦</b>：Chrome／Edge／Firefox 安裝 <a href="https://www.tampermonkey.net/" target="_blank" rel="noopener">Tampermonkey</a> 或 <a href="https://violentmonkey.github.io/" target="_blank" rel="noopener">Violentmonkey</a>。Chrome／Edge 需在擴充功能詳細資料中開啟「允許使用者腳本」。</li>
+        <li><b>Android</b>：Firefox、Edge 或 Kiwi 瀏覽器安裝同樣的擴充功能。</li>
+        <li><b>iPhone</b>：App Store 安裝「Userscripts」並在 Safari 擴充功能中啟用。</li>
+        <li>點這裡安裝腳本：<a class="btn small" id="installLink" href="userscript/einvoice-autofill.user.js">einvoice-autofill.user.js</a></li>
+      </ol>
+      <p class="hint" id="autofillStatus"></p>
+
+      <h3>支援的公司</h3>
+      <div class="tablewrap">
+        <table class="ptable">
+          <thead><tr><th>公司</th><th>號碼長度</th><th>歸戶頁</th><th>驗證碼</th></tr></thead>
+          <tbody id="providerTable"></tbody>
+        </table>
+      </div>
+
+      <h3>欣桃號碼拆分</h3>
+      <p class="hint">欣桃的歸戶頁要把載具分成「流水號」「檢核碼」兩格。如果帳單條碼是整串號碼，請設定流水號長度（從帳單上標示的兩段算出）。用分欄文字辨識成功一次後會自動記住。</p>
+      <div class="grid2">
+        <label class="field"><span>流水號長度</span><input type="number" id="shintaoLen" min="1" max="40" inputmode="numeric" placeholder="未設定"></label>
+        <label class="field"><span>整串總長度</span><input type="number" id="shintaoTotal" min="2" max="60" inputmode="numeric" placeholder="未設定"></label>
+      </div>
+
+      <h3>資料</h3>
+      <p class="hint">載具號碼、設定都只存在這個瀏覽器的 localStorage，不會上傳。條碼與文字辨識都在本機執行。</p>
+      <div class="row"><button class="link danger" id="btnReset" type="button">清除全部資料</button></div>
+    </details>
+
+    <footer class="foot">
+      <p>號碼格式與歸戶頁依各公司 2026 年 11 月網站設定，網站改版時自動填入可能失效，仍可使用複製功能。</p>
+    </footer>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div class="drop" id="drop" hidden><p>放開以辨識圖片</p></div>
+
+  <template id="tplItem">
+    <article class="item">
+      <header class="item-head">
+        <span class="tag"></span>
+        <span class="period"></span>
+        <span class="src"></span>
+      </header>
+      <div class="number" title="點一下複製完整號碼"></div>
+      <div class="extras"></div>
+      <div class="actions">
+        <button class="btn primary open" type="button">開啟歸戶頁</button>
+        <div class="chips"></div>
+      </div>
+      <p class="tip hint"></p>
+      <footer class="item-foot">
+        <button class="link done" type="button">標記已完成</button>
+        <button class="link danger remove" type="button">移除</button>
+      </footer>
+    </article>
+  </template>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-logo" viewBox="0 0 32 32"><rect x="5" y="3" width="22" height="26" rx="3" fill="currentColor" opacity=".15"/><path d="M9 9h2v14H9zm3 0h1v14h-1zm2 0h2v14h-2zm3 0h1v14h-1zm2 0h1v14h-1zm2 0h2v14h-2z" fill="currentColor"/></symbol>
+    <symbol id="i-screen" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 20h8M12 16v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 8v4m2-4v4m3-4v4m2-4v4m3-4v4" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="10" r="2" fill="currentColor"/><path d="M4 18l5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <script type="module" src="assets/app.js"></script>
+</body>
+</html>
